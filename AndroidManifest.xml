@@ -4845,11 +4845,9 @@
         <activity android:name="Settings$ManageAppExternalSourcesActivity"
                   android:exported="true"
                   android:label="@string/install_other_apps">
-            <intent-filter android:priority="1">
-                <action android:name="android.settings.MANAGE_UNKNOWN_APP_SOURCES" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:scheme="package" />
-            </intent-filter>
+            <!-- Halcyon Launcher owns package-specific external-source authorization so normal
+                 APK install flows never leave the console UI. This activity remains available for
+                 Settings-internal navigation by explicit component. -->
             <meta-data android:name="com.android.settings.FRAGMENT_CLASS"
                        android:value="com.android.settings.applications.appinfo.ExternalSourcesDetails" />
             <meta-data android:name="com.android.settings.HIGHLIGHT_MENU_KEY"
