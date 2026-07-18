@@ -93,8 +93,10 @@ public class FallbackHome extends Activity {
             flags = View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                     | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
         } else {
-            flags = View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION;
+            // HalcyonOS: fully hide the status/navigation bars during the pre-unlock boot
+            // home (not just draw under them), so nothing "Android" shows before the XMB.
+            flags = View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY;
         }
 
         mWallManager = getSystemService(WallpaperManager.class);
