@@ -1,0 +1,124 @@
+# Weekly security sync: merge LineageOS upstream into this HalcyonOS fork.
+#
+# Why this exists: this repo replaces the stock LineageOS module in the HalcyonOS
+# build, which takes it out of Lineage's automatic update path. Android security
+# patches that land upstream would otherwise never reach the fork. This job pulls
+# them in every week.
+#
+# Safety contract: it only ever pushes a CLEAN fast-forward-or-merge. If the merge
+# conflicts (upstream touched a file a HalcyonOS commit also changed), it pushes
+# NOTHING and opens an issue instead — so `main` is never left in a broken/
+# half-merged state, and you get an actionable heads-up to resolve it by hand.
+name: Sync upstream (security)
+
+on:
+  schedule:
+    # 06:00 UTC every Monday. Android Security Bulletins are monthly, so weekly
+    # keeps each merge small while never missing a patch by more than a few days.
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}   # also runnable on demand from the Actions tab
+
+# The default GITHUB_TOKEN needs write to push the merge and open the issue.
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      # The LineageOS branch this fork tracks. Bump this when HalcyonOS moves to a
+      # new Lineage/Android version.
+      UPSTREAM_REPO: https://github.com/LineageOS/android_packages_apps_Settings
+      UPSTREAM_BRANCH: lineage-23.2
+    steps:
+      - name: Checkout fork (main, full history)
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          # A merge needs real history, not a shallow clone.
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "halcyon-sync[bot]"
+          git config user.email "halcyon-sync@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+      - name: Already up to date?
+        id: check
+        run: |
+          behind=$(git rev-list --count HEAD..upstream/$UPSTREAM_BRANCH)
+          echo "behind=$behind" >> "$GITHUB_OUTPUT"
+          echo "Fork is $behind commit(s) behind upstream/$UPSTREAM_BRANCH."
+
+      - name: Merge upstream (clean only)
+        if: steps.check.outputs.behind != '0'
+        id: merge
+        run: |
+          set +e
+          git merge --no-edit --no-ff \
+            -m "HalcyonOS: merge LineageOS $UPSTREAM_BRANCH (weekly security sync)" \
+            "upstream/$UPSTREAM_BRANCH"
+          status=$?
+          if [ $status -ne 0 ]; then
+            # Leave nothing half-merged behind, and report a conflict.
+            conflicts=$(git diff --name-only --diff-filter=U | tr '\n' ' ')
+            git merge --abort
+            echo "merge=conflict" >> "$GITHUB_OUTPUT"
+            echo "conflicts=$conflicts" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge=clean" >> "$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+      - name: Push clean merge
+        if: steps.merge.outputs.merge == 'clean'
+        run: git push origin main
+
+      - name: Open issue on conflict
+        if: steps.merge.outputs.merge == 'conflict'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conflicts = "${{ steps.merge.outputs.conflicts }}".trim();
+            const branch = process.env.UPSTREAM_BRANCH;
+            const title = `Upstream security sync needs manual merge (${branch})`;
+            const body = [
+              `The weekly upstream sync could **not** merge \`LineageOS/${branch}\` cleanly,`,
+              `so nothing was pushed — \`main\` is untouched and safe.`,
+              ``,
+              `**Conflicting files:**`,
+              '```',
+              conflicts || '(merge conflict; run locally to see details)',
+              '```',
+              ``,
+              `Resolve locally:`,
+              '```bash',
+              `git fetch upstream ${branch}`,
+              `git merge upstream/${branch}   # fix conflicts, keeping the HalcyonOS changes`,
+              `git push origin main`,
+              '```',
+              ``,
+              `_This includes upstream security patches — please resolve when you can._`,
+            ].join("\n");
+            // Reuse an existing open sync issue instead of piling up duplicates.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "upstream-sync",
+            });
+            if (existing.data.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ["upstream-sync"],
+              });
+            }
